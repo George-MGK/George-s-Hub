@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberSec 101: Password Analyzer</title>
+    <!-- We use Tailwind via CDN so we don't have to write custom CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Custom CSS for the new Data Breach background -->
+    <style>
+        body {
+            /* References the image you provided */
+            background-image: url('image_4.png');
+            background-size: cover; 
+            background-position: center; 
+            background-repeat: no-repeat; 
+            background-attachment: fixed;
+        }
+    </style>
+</head>
+<!-- Removed bg-gray-100 to ensure the image shows cleanly -->
+<body class="min-h-screen flex items-center justify-center p-4 font-sans text-gray-800">
+
+    <div class="max-w-xl w-full bg-white rounded-xl shadow-lg p-8 border border-gray-200">
+        
+        <h1 class="text-3xl font-bold mb-2 text-blue-600">Password Analyzer</h1>
+        <p class="text-gray-500 mb-6 text-sm">A 1st-year cybersecurity project demonstrating hashing, entropy, and k-Anonymity API integration.</p>
+
+        <!-- Input Area -->
+        <div class="mb-6">
+            <label class="block text-sm font-semibold mb-2" for="passwordInput">Test a Password:</label>
+            <input 
+                type="text" 
+                id="passwordInput" 
+                placeholder="Type a password to analyze..." 
+                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            >
+        </div>
+
+        <!-- Strength / Entropy Meter -->
+        <div class="mb-6">
+            <div class="flex justify-between text-sm mb-1">
+                <span class="font-semibold">Entropy Score:</span>
+                <span id="entropyScore" class="font-bold">0 bits</span>
+            </div>
+            <!-- The visual bar -->
+            <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+                <div id="strengthBar" class="bg-red-500 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="strengthText" class="text-xs text-gray-500">Enter a password to calculate strength.</p>
+        </div>
+
+        <!-- Hash Outputs -->
+        <div class="space-y-4 mb-6">
+            <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">SHA-256 Hash (For storage)</label>
+                <div id="sha256Output" class="w-full bg-gray-50 p-2 text-xs font-mono break-all rounded border border-gray-200 min-h-[34px]"></div>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">SHA-1 Hash (For HaveIBeenPwned API)</label>
+                <div id="sha1Output" class="w-full bg-gray-50 p-2 text-xs font-mono break-all rounded border border-gray-200 min-h-[34px]"></div>
+            </div>
+        </div>
+
+        <!-- Breach Check Button & Result -->
+        <div class="border-t pt-6 mt-6 border-gray-200">
+            <button 
+                id="checkBreachBtn" 
+                class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-4 rounded-lg transition"
+            >
+                Check Known Breaches (k-Anonymity)
+            </button>
+            
+            <div id="apiResult" class="mt-4 p-4 rounded-lg hidden text-sm font-semibold text-center">
+                <!-- API results will appear here -->
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // DOM Elements
+        const passwordInput = document.getElementById('passwordInput');
+        const entropyScore = document.getElementById('entropyScore');
+        const strengthBar = document.getElementById('strengthBar');
+        const strengthText = document.getElementById('strengthText');
+        const sha256Output = document.getElementById('sha256Output');
+        const sha1Output = document.getElementById('sha1Output');
+        const checkBreachBtn = document.getElementById('checkBreachBtn');
+        const apiResult = document.getElementById('apiResult');
+
+        // Event Listener: When user types, update entropy and hashes
+        passwordInput.addEventListener('input', async (e) => {
+            const pwd = e.target.value;
+            
+            // Reset breach results when password changes
+            apiResult.classList.add('hidden');
+            
+            if (pwd.length === 0) {
+                resetUI();
+                return;
+            }
+
+            // 1. Calculate Entropy
+            calculateEntropy(pwd);
+
+            // 2. Calculate Hashes using Web Crypto API
+            sha256Output.textContent = await hashString(pwd, 'SHA-256');
+            sha1Output.textContent = await hashString(pwd, 'SHA-1');
+        });
+
+        // Event Listener: Check HaveIBeenPwned API
+        checkBreachBtn.addEventListener('click', async () => {
+            const pwd = passwordInput.value;
+            if (!pwd) return;
+
+            checkBreachBtn.textContent = "Checking...";
+            apiResult.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
+            apiResult.textContent = "";
+
+            try {
+                // Get the SHA-1 hash for the API
+                const fullHash = await hashString(pwd, 'SHA-1');
+                
+                // k-Anonymity: Split into first 5 chars and the rest
+                const prefix = fullHash.substring(0, 5);
+                const suffix = fullHash.substring(5);
+
+                // Fetch breached suffixes matching our prefix
+                const response = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
+                const textData = await response.text();
+
+                // Check if our suffix is in the returned text list
+                const isPwned = textData.includes(suffix);
+
+                if (isPwned) {
+                    apiResult.classList.add('bg-red-100', 'text-red-700');
+                    apiResult.textContent = "⚠️ Warning: This password has appeared in a data breach!";
+                } else {
+                    apiResult.classList.add('bg-green-100', 'text-green-700');
+                    apiResult.textContent = "✅ Good News: Not found in known databases.";
+                }
+            } catch (error) {
+                apiResult.classList.add('bg-gray-100', 'text-gray-700');
+                apiResult.textContent = "Error connecting to breach database.";
+            } finally {
+                checkBreachBtn.textContent = "Check Known Breaches (k-Anonymity)";
+            }
+        });
+
+        // Helper Function: Cryptographic Hashing
+        async function hashString(str, algorithm) {
+            const buffer = new TextEncoder().encode(str);
+            const hashBuffer = await crypto.subtle.digest(algorithm, buffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            // Convert bytes to hex string
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        }
+
+        // Helper Function: Calculate Password Entropy
+        function calculateEntropy(pwd) {
+            let poolSize = 0;
+            
+            // Check character types present
+            if (/[a-z]/.test(pwd)) poolSize += 26; // Lowercase
+            if (/[A-Z]/.test(pwd)) poolSize += 26; // Uppercase
+            if (/[0-9]/.test(pwd)) poolSize += 10; // Numbers
+            if (/[^a-zA-Z0-9]/.test(pwd)) poolSize += 32; // Symbols (approx)
+
+            // Entropy formula: Length * log2(Pool Size)
+            const entropy = Math.floor(pwd.length * (Math.log(poolSize) / Math.log(2)));
+            
+            // Handle edge case of very small pool
+            const finalEntropy = isNaN(entropy) ? 0 : entropy;
+            entropyScore.textContent = `${finalEntropy} bits`;
+
+            // Update Visual Bar
+            updateStrengthBar(finalEntropy);
+        }
+
+        // Helper Function: Update the visual strength meter
+        function updateStrengthBar(entropy) {
+            let percentage = Math.min((entropy / 100) * 100, 100);
+            strengthBar.style.width = `${percentage}%`;
+
+            if (entropy < 40) {
+                strengthBar.className = "bg-red-500 h-3 rounded-full transition-all duration-300";
+                strengthText.textContent = "Weak (Easily cracked)";
+            } else if (entropy < 70) {
+                strengthBar.className = "bg-yellow-500 h-3 rounded-full transition-all duration-300";
+                strengthText.textContent = "Moderate (Acceptable)";
+            } else {
+                strengthBar.className = "bg-green-500 h-3 rounded-full transition-all duration-300";
+                strengthText.textContent = "Strong (Highly resistant)";
+            }
+        }
+
+        // Helper Function: Reset UI when input is empty
+        function resetUI() {
+            entropyScore.textContent = "0 bits";
+            strengthBar.style.width = "0%";
+            strengthBar.className = "bg-gray-300 h-3 rounded-full transition-all duration-300";
+            strengthText.textContent = "Enter a password to calculate strength.";
+            sha256Output.textContent = "";
+            sha1Output.textContent = "";
+        }
+    </script>
+</body>
+</html>
